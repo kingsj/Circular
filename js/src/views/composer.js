@@ -23,6 +23,7 @@ Circular.Views.Composer = Backbone.View.extend({
 		$(".dropzone").filedrop({
 			url: "api/upload",
 			allowedfiletypes: ['image/jpeg','image/png','image/gif'],
+			maxfilesize: 8,
 			dragOver: function(){ 
 				$(this).addClass("over");
 			},
@@ -98,28 +99,18 @@ Circular.Views.Composer = Backbone.View.extend({
 	},
 	countdown: function(e){
 		if (e) {
-			var len = $(e.target).val().length;
+			var tweet = $(e.target).val();
 		}
 		else {
-			var len = this.$("#textarea").val().length;
+			var tweet = this.$("#textarea").val();
 		}
+		var len = twttr.txt.getTweetLength(tweet);
 		if (len == 0) {
 			this.$(".countdown").html("");
 		}
 		else {
-			this.$(".countdown").html(140 - len);
-			if (len > 130) {
-				this.$(".countdown").addClass("warning");
-			}
-			else {
-				this.$(".countdown").removeClass("warning");
-			}
-			if (len > 140) {
-				this.$("#postnow, #addtoposts").prop("disabled", true);
-			}
-			else {
-				this.$("#postnow, #addtoposts").prop("disabled", false);
-			}
+			this.$(".countdown").html(140 - len).toggleClass("warning", len > 130);
+			this.$("#postnow, #addtoposts").prop("disabled", len > 140);
 		}
 	},
 	resetComposer: function(){

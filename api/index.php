@@ -6,7 +6,10 @@ use Symfony\Component\HttpFoundation\Response;
 require_once __DIR__.'/vendor/autoload.php';
 require_once __DIR__.'/config.php';
 
-$app = new Silex\Application();
+
+
+
+$app = new Silex\Application(['debug' => true]);
 
 /***
  *
@@ -16,9 +19,21 @@ $app = new Silex\Application();
 
 $container = new Illuminate\Container\Container;
 $container->singleton('mongoveldb', function() {
-	return new Mongovel\DB('mongodb://localhost', 'circular');
+	$d = new Mongovel\DB('mongodb://localhost', 'circular', [
+		'host' => 'localhost',
+		'port' => 27017,
+	]);
+	unset($d->options['server']);
+	return $d;
 });
-
+class Config {
+	public function get($s) {
+		return false;
+	}
+}
+$container->singleton('config', function() {
+	return new Config;
+});
 Mongovel\Mongovel::setContainer($container);
 
 
@@ -47,9 +62,9 @@ $protected = $app['controllers_factory'];
 
 $protected->before(function (Request $request) use ($app) {
 	// `Protected` endpoints require authentication:
-	session_set_cookie_params(60*60*24*30);
-	ini_set('session.gc_maxlifetime', 60*60*24*30);
-	session_start();
+	
+	(new CustomSessionHandler)->setup();
+	
 	if (!isset($_SESSION['account'])) {
 		return new Response('Unauthorized', 401);
 	}
@@ -59,10 +74,10 @@ $protected->before(function (Request $request) use ($app) {
 	foreach ($_SESSION['account']['users'] as $id => $value) {
 		$users[$id] = new MongoId($id);
 	}
-	$app['account'] = array(
+	$app['account'] = [
 		'id'    => $_SESSION['account']['id'],
-		'users' => $users
-	);
+		'users' => $users,
+	];
 });
 
 
@@ -88,10 +103,10 @@ $app->before(function (Request $request) use ($app) {
  *
  */
 
-$protected->get('/posts', function () use ($app) {
+$protected->get('/api/posts', function () use ($app) {
 	// Retrieve all posts by users managed by current account, sorted by time ascending:
 	
-	$posts = Post::find(array('user._id' => array('$in' => $app['account']['users'])))
+	$posts = Post::find(array('user._id' => array('$in' => array_values($app['account']['users']))))
 		->sort(array('time' => 1));
 	
 	
@@ -119,7 +134,7 @@ $protected->get('/posts', function () use ($app) {
 
 
 
-$protected->post('/posts', function (Request $request) use ($app) {
+$protected->post('/api/posts', function (Request $request) use ($app) {
 	
 	$post = $app['data'];
 	
@@ -129,7 +144,7 @@ $protected->post('/posts', function (Request $request) use ($app) {
 	}
 	
 	// Add user information:
-	$m = new Mongo();
+	$m = new MongoClient();
 	$user = $m->circular->users->findOne(array('_id' => new MongoId($post['user'])));
 	$post['user'] = $user;
 	
@@ -148,7 +163,7 @@ $protected->post('/posts', function (Request $request) use ($app) {
 	// @see http://stackoverflow.com/questions/6351271/backbone-js-get-and-set-nested-object-attribute
 	
 	
-	$m = new Mongo();
+	$m = new MongoClient();
 	
 	if (isset($post['time']) && $post['time'] == "now") {
 		// If explicitly requested, send it right now through `queue`:
@@ -166,21 +181,23 @@ $protected->post('/posts', function (Request $request) use ($app) {
 
 
 
-$protected->delete('/posts/{id}', function (Request $request, $id) use ($app) {
+$protected->delete('/api/posts/{id}', function (Request $request, $id) use ($app) {
 	// According to the assert, this looks like a valid MongoId
 	
-	$m = new Mongo();
+	$m = new MongoClient();
 	$m->circular->posts->remove(array(
 		'_id'      => new MongoId($id),
-		'user._id' => array('$in' => $app['account']['users'])
+		'user._id' => array('$in' => array_values($app['account']['users']))
 	));
 	// We only delete the post if it is owned by the current user.
+
+	return new Response('Deleted', 204);
 })
 ->assert('id', '\w{24}');
 
 
 
-$protected->put('/posts/{id}', function (Request $request, $id) use ($app) {
+$protected->put('/api/posts/{id}', function (Request $request, $id) use ($app) {
 	
 	$put = $app['data'];
 	
@@ -188,10 +205,10 @@ $protected->put('/posts/{id}', function (Request $request, $id) use ($app) {
 	
 	if (isset($put['time']) && $put['time'] == "now") {
 		
-		$m = new Mongo();
+		$m = new MongoClient();
 		$post = $m->circular->posts->findOne(array(
 			'_id'      => new MongoId($id),
-			'user._id' => array('$in' => $app['account']['users'])
+			'user._id' => array('$in' => array_values($app['account']['users']))
 		));
 		// We only update the post if it is owned by the current user.
 		
@@ -201,6 +218,8 @@ $protected->put('/posts/{id}', function (Request $request, $id) use ($app) {
 			$m->circular->posts->remove(array('_id' => $post['_id']));
 		}
 	}
+	
+	return $app->json(["success" => true]);
 })
 ->assert('id', '\w{24}');
 
@@ -212,25 +231,25 @@ $protected->put('/posts/{id}', function (Request $request, $id) use ($app) {
  *
  */
 
-$protected->post('/times', function (Request $request) use ($app) {
+$protected->post('/api/times', function (Request $request) use ($app) {
 	
 	$posts = $app['data']['posts'];
 	
-	$m = new Mongo();
+	$m = new MongoClient();
 	$mongoposts = $m->circular->posts;
 	
 	foreach ($posts as $post) {
 		$mongoposts->update(
 			array(
 				'_id'      => new MongoId($post['id']), 
-				'user._id' => array('$in' => $app['account']['users'])
+				'user._id' => array('$in' => array_values($app['account']['users']))
 			),
 			array('$set' => array('time' => new MongoDate($post['time'])))
 		);
 		// We only update the post if it is owned by the current user.	
 	}
 	
-	return $app->json(array("success" => true));
+	return $app->json(["success" => true]);
 });
 
 
@@ -241,7 +260,7 @@ $protected->post('/times', function (Request $request) use ($app) {
  *
  */
 
-$protected->post('/upload', function (Request $request) use ($app) {
+$protected->post('/api/upload', function (Request $request) use ($app) {
 	$file = $request->files->get('userfile');
 	if ($file->isValid()) {
 		$extension = $file->guessExtension();
@@ -270,16 +289,16 @@ $protected->post('/upload', function (Request $request) use ($app) {
  *
  */
 
-$protected->get('/settings', function (Request $request) use ($app) {
+$protected->get('/api/settings', function (Request $request) use ($app) {
 	$account = Account::findOne(array('_id' => new MongoId($app['account']['id'])));
 	unset($account->users);
 	return $app->json($account->toArray());
 });
 
-$protected->post('/settings', function (Request $request) use ($app) {
+$protected->post('/api/settings', function (Request $request) use ($app) {
 	$email = $app['data']['email'];
 	
-	$m = new Mongo();
+	$m = new MongoClient();
 	if ($email) {
 		$m->circular->accounts->update(
 			array('_id'  => new MongoId($app['account']['id'])),
@@ -292,6 +311,8 @@ $protected->post('/settings', function (Request $request) use ($app) {
 			array('$unset' => array('email' => true))
 		);
 	}
+	
+	return $app->json(["success" => true]);
 });
 
 
@@ -302,9 +323,9 @@ $protected->post('/settings', function (Request $request) use ($app) {
  *
  */
 
-$public->get('/counter', function (Request $request) use ($app) {
+$public->get('/api/counter', function (Request $request) use ($app) {
 	$count = Post::count();
-	return $app->json(array('count' => $count));
+	return $app->json(['count' => $count]);
 });
 
 

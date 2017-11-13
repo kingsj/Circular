@@ -4,7 +4,7 @@ module.exports = function(grunt) {
 	// Project configuration.
 	grunt.initConfig({
 		meta: {
-			version: '0.1.0',
+			version: '1.1',
 			banner: '/*! Circular - v<%= meta.version %> - ' +
 			'<%= grunt.template.today("yyyy-mm-dd") %>\n' +
 			' * http://circular.io/\n' +
@@ -24,6 +24,7 @@ module.exports = function(grunt) {
 					'vendor/mustache.js',
 					'vendor/underscore.js',
 					'vendor/backbone.js',
+					'vendor/twitter-text-1.11.0.min.js',
 					'src/bootstrap.js',
 					'src/utils.js',
 					'src/models/*.js',
